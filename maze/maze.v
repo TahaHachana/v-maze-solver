@@ -22,24 +22,24 @@ pub mut:
 	x2              int
 	y1              int
 	y2              int
-	ctx             gg.Context
 }
 
-pub fn Cell.new(ctx gg.Context) Cell {
+// Cell.new returns an unvisited cell with all four walls up.
+pub fn Cell.new() Cell {
 	return Cell{
-		has_left_wall: true
-		has_right_wall: true
-		has_top_wall: true
+		has_left_wall:   true
+		has_right_wall:  true
+		has_top_wall:    true
 		has_bottom_wall: true
-		visited: false
-		x1: 0
-		x2: 0
-		y1: 0
-		y2: 0
-		ctx: ctx
+		visited:         false
+		x1:              0
+		x2:              0
+		y1:              0
+		y2:              0
 	}
 }
 
+// draw_wall queues one wall segment, in the wall color if has_wall is set, otherwise in the background color.
 pub fn (c Cell) draw_wall(x1 int, y1 int, x2 int, y2 int, has_wall bool, mut m Maze) {
 	color := if has_wall { maze.wall_color } else { maze.no_wall_color }
 	line := graphics.Line.new(graphics.Point.new(x1, y1), graphics.Point.new(x2, y2),
@@ -47,6 +47,7 @@ pub fn (c Cell) draw_wall(x1 int, y1 int, x2 int, y2 int, has_wall bool, mut m M
 	m.line_queue.push(line)
 }
 
+// draw records the cell's pixel bounds and queues its four walls.
 pub fn (mut c Cell) draw(x1 int, y1 int, x2 int, y2 int, mut m Maze) {
 	c.x1 = x1
 	c.x2 = x2
@@ -58,6 +59,7 @@ pub fn (mut c Cell) draw(x1 int, y1 int, x2 int, y2 int, mut m Maze) {
 	c.draw_wall(x1, y1, x1, y2, c.has_left_wall, mut m)
 }
 
+// draw_move queues a line between the centers of c and to_cell; undo draws it in the backtrack color.
 pub fn (c Cell) draw_move(to_cell Cell, undo bool, mut m Maze) {
 	half_length := math.abs(c.x2 - c.x1) / 2
 	x_center := half_length + c.x1
@@ -82,31 +84,36 @@ pub mut:
 	num_cols     int
 	cell_size_x  int
 	cell_size_y  int
-	ctx          gg.Context
+	ctx          &gg.Context = unsafe { nil }
 	line_queue   datatypes.Queue[graphics.Line]
 	render_level int
+	solve_start  int // index in line_queue of the first line queued by the solver
 }
 
+// Maze.new builds a num_cols x num_rows maze at (x1, y1), carves it and solves it.
+// Every step is queued in line_queue so the frame loop can animate it.
 pub fn Maze.new(x1 int, y1 int, num_rows int, num_cols int, cell_size_x int, cell_size_y int) &Maze {
 	mut m := Maze{
-		cells: [][]Cell{}
-		x1: x1
-		y1: y1
-		num_rows: num_rows
-		num_cols: num_cols
-		cell_size_x: cell_size_x
-		cell_size_y: cell_size_y
-		line_queue: datatypes.Queue[graphics.Line]{}
+		cells:        [][]Cell{}
+		x1:           x1
+		y1:           y1
+		num_rows:     num_rows
+		num_cols:     num_cols
+		cell_size_x:  cell_size_x
+		cell_size_y:  cell_size_y
+		line_queue:   datatypes.Queue[graphics.Line]{}
 		render_level: 0
 	}
 	m.create_cells()
 	m.break_entrance_and_exit()
 	m.break_walls_r(0, 0)
 	m.reset_cells_visited()
+	m.solve_start = m.line_queue.len()
 	m.solve()
 	return &m
 }
 
+// draw_cell queues the walls of the cell at column i, row j.
 pub fn (mut m Maze) draw_cell(i int, j int) {
 	x1 := m.x1 + i * m.cell_size_x
 	y1 := m.y1 + j * m.cell_size_y
@@ -115,11 +122,12 @@ pub fn (mut m Maze) draw_cell(i int, j int) {
 	m.cells[i][j].draw(x1, y1, x2, y2, mut m)
 }
 
+// create_cells fills the grid with walled cells and queues their outlines.
 pub fn (mut m Maze) create_cells() {
 	for i := 0; i < m.num_cols; i++ {
 		mut col_cells := []Cell{}
 		for j := 0; j < m.num_rows; j++ {
-			col_cells << Cell.new(m.ctx)
+			col_cells << Cell.new()
 		}
 		m.cells << col_cells
 	}
@@ -130,6 +138,7 @@ pub fn (mut m Maze) create_cells() {
 	}
 }
 
+// break_entrance_and_exit opens the top-left cell's top wall and the bottom-right cell's bottom wall.
 pub fn (mut m Maze) break_entrance_and_exit() {
 	// Entrance
 	m.cells[0][0].has_top_wall = false
@@ -145,6 +154,7 @@ pub:
 	j int
 }
 
+// break_walls_r carves passages with a randomized depth-first search starting at cell (i, j).
 pub fn (mut m Maze) break_walls_r(i int, j int) {
 	m.cells[i][j].visited = true
 	for {
@@ -206,6 +216,7 @@ pub fn (mut m Maze) break_walls_r(i int, j int) {
 	}
 }
 
+// solve_r searches depth first from (i, j) for the exit and queues each move and backtrack.
 pub fn (mut m Maze) solve_r(i int, j int) bool {
 	// visit the current cell
 	m.cells[i][j].visited = true
@@ -259,10 +270,12 @@ pub fn (mut m Maze) solve_r(i int, j int) bool {
 	return false
 }
 
+// solve finds a path from the entrance to the exit, returning true if one exists.
 pub fn (mut m Maze) solve() bool {
 	return m.solve_r(0, 0)
 }
 
+// reset_cells_visited clears the visited flag on every cell.
 pub fn (mut m Maze) reset_cells_visited() {
 	for i := 0; i < m.num_cols; i++ {
 		for j := 0; j < m.num_rows; j++ {
